@@ -1,0 +1,265 @@
+Chapter 4. 부팅하기
+4.1 메모리 설계
+
+QEMU는 기본적으로 128M 할당
+  - text 영역: 코드가 있는 공간. 
+  - data 영역: 초기화된 전역 변수가 있는 공간, 전역 변수 선언 시 초기 값을 할당할 경우 해당 전역변수가 점유하는 공간은 여기에 할당
+  - BSS  영역 : 초기화하지 않은 전역 변수가 저장되는 공간. 심벌과 크기만 저장
+
+text영역은 빠른 메모리에 배치, 속도에 민감한 데이터들은 링커에게 정보를 주어 빠른 메모리에 배치
+
+-----------
+text영역 : 1MB 할당 - 0x00000000 ~ 0x000FFFFF
+data, BSS영역 : 
+	- 데이터의 형태 : 동작 모드별 스택, 태스크 스택, 전역 변수, 동적 메모리 할당 영역
+	- 데이터의 속성 : 성능 중시 데이터, 큰 공간이 필요한 데이터, 공유 데이터
+
+
+ - USR, SYS(2MB): 0x00100000-0x002FFFFF
+ - SVC     (1MB): 0x00300000-0x003FFFFF
+ - IRQ     (1MB): 0x00400000-0x004FFFFF
+ - FIQ     (1MB): 0x00500000-0x005FFFFF
+ - ABT     (1MB): 0x00600000-0x006FFFFF
+ - UND     (1MB): 0x00700000-0x007FFFFF
+
+USR모드와 SYS모드는 메모리 공간과 레지스터 모두 공유, 기본 동작 모드로 사용되므로 2MB할당
+RTOS이므로 task stack영역도 고려. Task 마다 1MB 스택 영역을 할당하므로 총 64MB배정 (최대 64개의 Task)
+나머지는 동적 할당 영역
+
+|------------------|	0x07FFFFFF	( 55 MB )
+|                  |
+|                  |
+|     동적 할당    |
+|                  |  
+|                  |
+|                  |
+|------------------|	0x04900000	(  1 MB )
+|  전역 변수 영역  |	0x048FFFFF
+|------------------|	0x04800000	( 64 MB )
+|                  |	0x047FFFFF
+|                  |
+|                  |
+|                  |
+|                  |
+|    Task Stack    |
+|                  |
+|                  |
+|                  |
+|                  |
+|                  |
+|------------------|	0x00800000	(  1 MB )
+|  UND mode Stack  |	0x007FFFFF
+|------------------|	0x00700000	(  1 MB )
+|  ABT mode Stack  |	0x006FFFFF
+|------------------|	0x00600000	(  1 MB )
+|  FIQ mode Stack  |	0x005FFFFF
+|------------------|	0x00500000	(  1 MB )
+|  IRQ mode Stack  |	0x004FFFFF
+|------------------|	0x00400000	(  1 MB )
+|  SVC mode Stack  |	0x003FFFFF
+|------------------|	0x00300000	(  2 MB )
+|  USR/SYS mode    |	0x002FFFFF
+|         Stack    |
+|------------------|	0x00100000	(  1 MB )
+|     Text Area    |	0x000FFFFF
+|------------------|	0x00000000
+
+4.2 인셉션 벡터 테이블 만들기 - 인셉션 핸들러 작성
+======== Entry.S =============
+.text
+	.code 32
+	
+	.global vector_start
+	.global vector_end
+
+	vector_start:
+		LDR PC, reset_handler_addr
+		LDR PC, undef_handler_addr
+		LDR PC, svc_handler_addr
+		LDR PC, pftch_abt_handler_addr
+		B .
+		LDR PC, irq_handler_addr
+		LDR PC, fiq_handler_addr
+
+		reset_handler_Addr:	.word reset_handler
+		undef_handler_addr: 	.word dummy_handler
+		svc_handler_addr:	.word dummy_handler
+		pftch_abt_handler_addr: .word dummy_handler
+		data_abt_handler_addr:	.word dummy_handler
+		irq_handler_addr: 	.word dummy_handler
+		fiq_handler_addr:	.word dummy_handler
+	vector_end:
+
+	reset_handler:
+		LDR R0, =0x10000000
+		LDR R1, [R0]
+
+	dummy_handler:
+		B .
+.end
+
+===============================
+
+
+$ make debug
+$ make gdb
+
+(gdb) target remote:1234
+(gdb) continue
+
+^c
+(gdb) i r
+
+4.3 Exception 핸들러 만들기
+리셋 익셉션 핸들러를 가장 먼저 생성. -> 메모리 맵 설정
+앞서 설계한 모드별 스택 주소를 각 동작 모드의 뱅크드 레지스터 SP에 설정하는 작업 수행
+다른 메모리는 나빌로스에서 관리
+동작 모드별 스택이 모두 설정되면 c언어 main함수로 진입. 그 후부터는 어셈블리어가 아닌 C언어로 임베디드 시스템 제어
+
+ARM은 동작 모드가 7개 존재. 이중 USR모드와 SYS모드는 레지스터를 공유하므로 SP레지스터는 총 6개가 뱅크드 레지스터로 제공
+리셋 익셉션 핸들러에서는 동작 모드를 순서대로 변경해 가며 SP레지스터에 정해진 값을 넣는 작업 수행->각 동작 모드의 스택이 초기화
+
+4.3.1 스택 만들기
+
+===========  MemoryMap.h  ============  define stack memory address
+#define INST_ADDR_START		0
+#define USRSYS_STACK_START	0x00100000
+#define SVC_STACK_START		0x00300000
+#define IRQ_STACK_START		0x00400000
+#define FIQ_STACK_START		0x00500000
+#define ABT_STACK_START		0x00600000
+#define UND_STACK_START		0x00700000
+#define TASK_STACK_START	0x00800000
+#define GLOBAL_ADDR_START	0x04800000
+#define DALLOC_ADDR_START	0x04900000
+
+#define INST_MEM_SIZE		(USRSYS_STACK_START - INST_ADDR_START)
+#define USRSYS_STACK_SIZE	(SVC_STACK_START - USRSYS_STACK_START)
+#define SVC_STACK_SIZE		(IRQ_STACK_START - SVC_STACK_START)
+#define IRQ_STACK_SIZE		(FIQ_STACK_START - IRQ_STACK_START)
+#define ABT_STACK_SIZE		(UND_STACK_START - ABT_STACK_START)
+#define UND_STACK_SIZE		(TASK_STACK_START - UND_STACK_START)
+#define TASK_STACK_SIZE		(GLOBAL_ADDR_START - TASK_STACK_START)
+#define	DALLOC_MEM_SIZE		(55 * 1024 * 1024)
+
+#define USRSYS_STACK_TOP	(USRSYS_STACK_START + USRSYS_STACK_SIZE - 4)
+#define SVC_STACK_TOP		(SVC_STACK_START + SVC_STACK_SIZE - 4)
+#define IRQ_STACK_TOP		(IRQ_STACK_START + IRQ_STACK_SIZE - 4)
+#define FIQ_STACK_TOP		(FIQ_STACK_START + FIQ_STACK_SIZE - 4)
+#define ABT_STACK_TOP		(ABT_STACK_START + ABT_STACK_SIZE - 4)
+#define UND_STACK_TOP		(UND_STACK_START + UND_STACK_SIZE - 4)
+
+========================================
+
+===========  ARMv7AR.h  ================ 동작 모드 변경 코드
+#define ARM_MODE_BIT_USR	0x10
+#define ARM_MODE_BIT_FIQ	0x11
+#define ARM_MODE_BIT_IRQ	0x12
+#define	ARM_MODE_BIT_SVC	0x13
+#define ARM_MODE_BIT_ABT	0x17
+#define ARM_MODE_BIT_UND	0x1B
+#define ARM_MODE_BIT_SYS	0x1F
+#define ARM_MODE_BIT_MON	0x16
+
+========================================
+
+========== Entry.S ====================  동작 모드, 스택 초기화, 익셉션 핸들러
+#include "ARMv7AR.h"
+#include "MemoryMap.h"
+
+.text
+	.code 32
+	
+	.global vector_start
+	.global vector_end
+
+	vector_start:
+		LDR PC, reset_handler_addr
+		LDR PC, undef_handler_addr
+		LDR PC, svc_handler_addr
+		LDR PC, pftch_handler_addr
+		LDR PC, data_abt_handler_addr
+		B .
+		LDR PC, irq_handler_addr
+		LDR PC, fiq_handler_addr
+
+		reset_handler:
+			MRS r0, cpsr
+			BIC r1, r0, #0x1F
+			ORR r1, r1, #ARM_MODE_BIT_SVC
+			MSR cpsr, r1
+			LDR sp, =SVC_STACK_TOP
+
+			MRS r0, cpsr
+			BIC r1, r0, #0x1F
+			ORR r1, r1, #ARM_MODE_BIT_IRQ
+			MSR cpsr, r1
+			LDR sp, =IRQ_STACK_TOP
+
+			MRS r0, cpsr
+			BIC r1, r0, #0x1F
+			ORR r1, r1, #ARM_MODE_BIT_FIQ
+			MSR cpsr, r1
+			LDR sp, =FIQ_STACK_TOP
+			
+			MRS r0, cpsr
+			BIC r1, r0, #0x1F
+			ORR r1, r1, #ARM_MODE_BIT_ABT
+			MSR cpsr, r1
+			LDR sp, =ABT_STACK_TOP
+
+			MRS r0, cpsr
+			BIC r1, r0, #0x1F
+			ORR r1, r1, #ARM_MODE_BIT_UND
+			MSR cpsr, r1
+			LDR sp, =UND_STACK_TOP
+
+			MRS r0, cpsr
+			BIC r1, r0, #0x1F
+			ORR r1, r1, #ARM_MODE_BIT_SYS
+			MSR cpsr, r1
+			LDR sp, =USRSYS_STACK_TOP
+
+	dummy_handler:
+		B .
+.end
+
+==============================================
+
+스택은 높은 메모리주소에서 낮은 주소로 증가
+4byte는 padding
+
+$ make all 
+	# error : ARM_MODE_BIT_SVC등의 심벌이 정의되지 않음
+
+
+=============  Makefile  =====================  
+...
+
+ASM_OBJS = $(patsubst boot/%.S, build/%.o, $(ASM_SRCS))
+
+INC_DIRS = include    # <=======추가
+
+...
+
+#(AS) -march=$(ARCH) -mcpu=$(MCPU) -I $(INC_DIRS) -g -o $@ $<  # 마지막줄 수정
+
+===============================================
+
+$ make all    
+	# error -> #define은 전처리기에 의해서 처리됨, 전처리까지 하려면 arm-none-eabi-gcc 필요
+
+============= Makefile ========================
+...
+$(CC) -march=$(ARCH) -mcpu=$(MCPU) -I $(INC_DIRS) -g -o %@ $<  # 마지막줄 다시 수정
+
+===============================================
+
+$ make all
+	# error -> as대신 gcc를 사용했으므로 옵션도 변경해야함. -c옵션 추가 (오브젝트 파일 생성))
+
+============= Makefile ========================
+...
+$(CC) -march=$(ARCH) -mcpu=$(MCPU) -I $(INC_DIRS) -c -g -o $@ $<
+
+===============================================

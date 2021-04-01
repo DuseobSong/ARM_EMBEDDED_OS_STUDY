@@ -1,0 +1,149 @@
+3.1 reset vector
+pwd : /
+
+
+$ mkdir boot
+$vi Entry.S
+
+=== Entry.S ===
+.text					# .text 는 .end가 나올때까지의 모든 코드가 text섹션이라는의미
+	.coded 32			# 명령어 크기가 32비트
+	
+	.global vector_start		# .global은 C의 extern, 레이블 선언
+	.global vector_end		
+
+	vector_start:
+		MOV R0, R1		# 레지스터 R0를 R1으로 이동
+	vector_end:	
+		.space 1024, 0		# 해당 위치부터 1024바이트를 0으로 채움
+.end					# text섹션의 끝
+
+===============
+
+Memory address
+0000 0000		Mov Ro, R1 명령어
+0000 0004		0000 0000
+0000 0008		0000 0000
+...
+0000 0400		0000 0000
+
+
+-- compile 'Entry.s' with assembler and binary dump
+$ arm-none-eabi-as -march=armv7-a -mcpu=cortex-a8 -o Entry.o ./Entry.S
+	# ARM코어: cortex-a8, 아키텍쳐 : armv7-a, 
+$ arm-none-eabi-objcopy -O binary Entry.o Entry.bin
+	# 바이너리만 추출, Entry.o는 elf파일 <- elf파일 생성 시 링커 필요
+	# 링커 스크립트: 링커가 동작하기 위해 링커에 정보를 던져 주는 파일
+$ hexdump Entry.bin
+	# 바이너리 확인
+
+
+3.2 실행파일 생성
+=== navilos.ld === 링커 스크립트
+ENTRY(vector_start)			# 시작 위치의 심벌 지정
+SECTIONS				# 다음 중괄호 안의 블록이 섹션 배치 정보를 가지고 있다고 명시
+{
+	. = 0x0;			# 첫 번째 섹션이 메모리 주소 0x00000000에 위치한다고 아렬줌
+
+	.text :				# text섹션의 배치 순서를 지정, 추가 접오 입력 시 배치 메모리 주소까지 지정 가능, 추가 정보 없으면 링커는 시작 주소부터 순서대로 섹션 데이터 배치
+					# 메모리 주소 0x00000000에 리셋벡터가 위치해야 하므로 vector_start심벌이 나온 후 .text.섹션 적음, 이어서 data섹션과 bss섹션을 연속된 메모리에 배치
+	{
+		*(vector_start)
+		*(.text .rodata)
+	}
+	.data :
+	{
+		*(.data)
+	}
+	.bss :
+	{
+		*(.bss)	
+	}
+}
+
+====================
+
+$ arm-none_eabi-ld -n -T ./navilos.ld -nostdlib -o navilos.axf boot/Entry.o
+	# 실행파일 생성. -n: 링커에 섹션의 정렬을 자동으로 맞추지 말라고 지시, -T: 링커 스크립트의 파일명 알려주는 옵션, -nostdlib: 링커가 자동으로 표준 라이브러리를 링킹하지 않도록 지시, 링커 동작 완료 후 navilos.axf파일 생성됨
+$ arm-none-eabi-objdump -D navilos.axf
+	# -D :디스어셈블한 명령 ->  mov R0, R1 기계어 자체는 0xE1A00001
+
+$ ./navilos.axf : cannot excute binary file: Exec format error
+	# 리눅스 커널에서 동작하지 않는 섹션 배치로 만들어짐. 리눅스용 라이브러리 미포함 -> ARM 개발보드에 다운로드하여 동작확인, QEMU로 실행
+
+$ qemu-system-arm -M realview-pb-a8 -kernel navilos.axf -S -gdb tcp::1234,ipv4
+	# -M: 머신 지정, -kernel: ELF파일 이름 지정, -S: QEMU가 실행되자마자 일시정지, -gdb tcp::1234,ipv4: gdb와 연결하는 소켓 포트 지정
+
+# arm-none-eabi-gdb  # gdb에 연결
+# sudo apt install gdb-arm-none-eabi  # <-Ubuntu 20.04 에서는 apt사용 불가-> 직접 다운로드 후 설치
+	# https://developer.arm.com/tools-and-software/open-source-software/developer-tools/gnu-toolchain/gnu-rm/downloads
+	# https://askubuntu.com/questions/1243252/how-to-install-arm-none-eabi-gdb-on-ubuntu-20-04-lts-focal-fossa
+
+(gdb) target remote:1234	# 1234번 포트로 원격 디버깅 연결
+(gdb) x/4x 0			# 0x00000000주소에서 4바이트 출력
+
+
+3.4 빌드 자동화 - Makefile
+
+==== Makefile ====
+ARCH = armv7-a			# 아키텍쳐
+MCPU = cortex-a8		# CPU정보
+
+CC = arm-none_eabi-gcc		# 툴체인
+AS = arm-none-eabi-as
+LS = arm-none-eabi-ld
+OC = arm-none-eabi-objcopy
+
+LINKER_SCRIPT = ./navilos.ld	# 링커 스크립트
+	
+ASM_SRCS = $(wildcard boot/*.S)	# make의 builtin함수, boot디렉토리에서 확장자가 S인 파일이름을 모두 ASM_SRC에 저장
+ASM_OBJS = $(patsubst boot/%.S, build/%.o, $(ASM_SRCS)) # boot디렉토리에서 확장자가 S인 파일을 모두 o로 바꾼 뒤 ASM_OBJS변수에 값으로 저장, ASM_SRCS는 boot/Entry.S를 저장
+
+navilos = build/navilos.axf 		# elf파일 이름
+navilos_bin = build/navilos.bin		# 바이너리 파일 이름
+
+.PHONY: all clean run debug gdb		# 
+
+all: $(navilos)
+
+clean:
+	@rm -fr build
+
+run: $(navilos)			# QEMU실행 코드
+	qemu-system-arm -M realview-pb-a8 -kernel $(navilos)
+	
+debug: $(navilos)		# QEMU와 gdb 연결
+	qemu-system-arm -M realview-pb-a8 -kernel $(navilos) -S -gdb tcp:1234,ipv4
+
+gdb: 				# gdb이름  줄여서 저장
+	arm-none-eabi-gdb
+
+#(navilos): $(ASM_OBJS) $(LINKER_SCRIPt) 	# linker로 axf파일, bin파일 생성 코드
+	$(LD) -n -T $(LINKER_SCRIPT) -o $(navilos) $(ASM_OBJS)
+	$(OC) -D binary $(navilos) $(navilos_bin)
+
+build/%.o: boot/%.S				# *.s 파일을 *.o파일로 컴파일
+	mkdir -p $(shell dirname $@)
+	$(AS) -march=$(ARCH) -mcpu=$(MCPU) -g -o $@ $<
+
+========================
+
+$ make all
+# make debug
+
+3.5 하드웨어 정보 읽어오기 - 데이터시트 읽는 방법
+	# 레지스터 : 하드웨어가 소프트웨어와 상호작용하는 인터페이스. 레지스터 사용법은 데이터시트에 명시
+==== Entry.S ==== 수정
+.text
+	.code 32
+
+	.global vector_start
+	.global vector_end
+
+	vector_start:
+		LDR R0, 0x10000000
+		LDR R1, [R0]
+	vector_end:
+		.space 1024, 0
+.end
+
