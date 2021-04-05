@@ -3,10 +3,10 @@ MCPU = cortex-a8
 
 TARGET = rvpb
 
-CC = arm-linux-gnueabihf-gcc
-AS = arm-linux-gnueabihf-as
-LD = arm-linux-gnueabihf-ld
-OC = arm-linux-gnueabihf-objcopy
+CC = arm-none-eabi-gcc
+AS = arm-none-eabi-as
+LD = arm-none-eabi-gcc
+OC = arm-none-eabi-objcopy
 
 LINKER_SCRIPT = ./navilos.ld
 MAP_FILE = build/navilos.map
@@ -30,6 +30,8 @@ INC_DIRS = -I include 		\
 
 CFLAGS = -c -g -std=c11
 
+LDFLAGS = -nostartfiles -nostdlib -nodefaultlibs -static -lgcc
+
 navilos = build/navilos.axf
 navilos_bin = build/navilos.bin
 
@@ -50,13 +52,13 @@ gdb:
 	gdb-multiarch
 
 $(navilos): $(ASM_OBJS) $(C_OBJS) $(LINKER_SCRIPT)
-	$(LD) -n -T $(LINKER_SCRIPT) -o $(navilos) $(ASM_OBJS) $(C_OBJS) -Map=$(MAP_FILE)
+	$(LD) -n -T $(LINKER_SCRIPT) -o $(navilos) $(ASM_OBJS) $(C_OBJS) -Wl,-Map=$(MAP_FILE) $(LDFLAGS)
 	$(OC) -O binary $(navilos) $(navilos_bin)
 
 build/%.os: %.S
 	mkdir -p $(shell dirname $@)
-	$(CC) -march=$(ARCH) -mcpu=$(MCPU) $(INC_DIRS) $(CFLAGS) -o $@ $<
+	$(CC) -march=$(ARCH) -mcpu=$(MCPU) -marm $(INC_DIRS) $(CFLAGS) -o $@ $<
 
 build/%.o: %.c
 	mkdir -p $(shell dirname $@)
-	$(CC) -march=$(ARCH) -mcpu=$(MCPU) $(INC_DIRS) $(CFLAGS) -o $@ $<
+	$(CC) -march=$(ARCH) -mcpu=$(MCPU) -marm $(INC_DIRS) $(CFLAGS) -o $@ $<
