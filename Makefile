@@ -28,7 +28,7 @@ INC_DIRS = -I include 		\
 	   -I hal/$(TARGET)	\
 	   -I lib
 
-CFLAGS = -c -g -std=c11
+CFLAGS = -c -g -std=c11 -mthumb-interwork
 
 LDFLAGS = -nostartfiles -nostdlib -nodefaultlibs -static -lgcc
 

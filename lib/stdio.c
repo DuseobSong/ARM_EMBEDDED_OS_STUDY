@@ -4,7 +4,7 @@
 
 #define PRINTF_BUF_LEN 1024
 
-static char sPrintf_buf[PRINTF_BUF_LEN]; 	// 1kB
+static char printf_buf[PRINTF_BUF_LEN]; 	// 1kB
 uint32_t putstr(const char* s){
 	uint32_t c = 0;
 	while(*s){
@@ -17,10 +17,10 @@ uint32_t putstr(const char* s){
 uint32_t debug_printf(const char* format, ...){
 	va_list args;
 	va_start(args, format);
-	vsprintf(sPrintf_buf, format, args);
+	vsprintf(printf_buf, format, args);
 	va_end(args);
 
-	return putstr(sPrintf_buf);
+	return putstr(printf_buf);
 }
 
 uint32_t vsprintf(char* buf, const char* format, va_list arg){

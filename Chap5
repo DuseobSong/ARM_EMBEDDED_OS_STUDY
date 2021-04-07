@@ -1,0 +1,100 @@
+Chap.5 UART
+
+UART : Universal Asynchronous Receiver/Transmitter
+
+RealViewPB에는 PL011이라는 UART 하드웨어 모듈 장착, 데이터 시트는 ARM인포센터 참조
+UART를 통하여 어떤 데이터도 주고 받을 수 있으므로, 터미널을 UART포트와 연결하면 UART를 통해 받은 아스키 코드를 그 코드에 해당하는 문자로 화면에 출력 가능
+
+UARTDR : 데이터 레지스터, 0~7번 비트까지 8비트는 입출력 데이터가 사용하는 레지스터. 8~11번 비트는 종류별로 정의된 에러 (프레임, 패리티, 브레이크, 오버런 에러) 에러가 발생하면 해당비트의 값이 1로 변함
+
+UART의 기본 주소는 0x10009000, UARTDR의 오프셋은 0x0이므로 UARTDR_OFFSET은 0x00
+
+# 비효율적인 에러 검사 코드
+uint32_t *uartdr = (uint32_t*)(UART_BASE_ADDR + UARTDR_OFFSET);
+
+*uartdr = (data) << UARTDR_DATA;
+bool fe = (bool)((*uartdr >> UARTDR_FE) & 0x1);
+bool pe = (bool)((*uartdr >> UARTDR_PE) & 0x1);
+bool be = (bool)((*uartdr >> UARTDR_BE) & 0x1);
+bool oe = (bool)((*uartdr >> UARTDR_OE) & 0x1);
+
+if(fe || pe || be || oe){
+	// error handling code
+}
+
+# 구조체 이용한 레지스터 관리
+typedef union UARTDR_t{
+	uint32_t all;
+	struct{
+		uint32_t DATA:8; // 7:0
+		...
+	} bits;
+} UARTDR_t;
+
+...
+
+# 구조체를 활용한 에러 검사 코드
+Uart_->uartdr.DATA = data & 0xFF;
+if(Uart->uartdr.FE || Uart->uartdr.PE || Uart->uartdr.BE || Uart->uartdr.OE){
+	# error handling code
+}
+
+'Uart.h'처럼 PL011의 레지스터를 구조체를 사용하여 정의할 경우, 레지스터의 베이스 주소만 알면 각 레지스터는 이름으로 접근이 가능하므로 효율적이다.
+
+=====  Regs.c  =====
+#include "stdint.h"
+#include "Uart.h"
+
+volatile PL011_t* Uart = (PL011_t*)UART_BASE_ADDRESS0;
+
+====================
+
+5.1.1 UART공용 인터페이스
+개별 하드웨어는 각자의 방식으로 동작하더라도 이를 사용하는 코드는 공용 인터페이스를 통해서 같은 방식으로 사용할 수 있어야 한다. (디바이스 드라이버와 비슷) 그러므로 공용 인터페이스 API만 정의하고, 해당 API를 각자의 하드웨어가 구현하는 방식으로 범용성 추구
+
+
+	+-----------------+ +---------------+ +-------------+
+	|		  | |               | |	   HW A     |
+        |                 | |               | +-------------+
+	|                 | |               | +-------------+
+	|                 | |   UART API    | |    HW B     |
+	|                 | |               | +-------------+
+	|                 | |               | +-------------+
+	|                 | |               | |    HW C     |
+	|                 | +---------------+ +-------------+
+	|                 | +---------------+ +-------------+
+	|                 | |               | |    HW A     |
+	|                 | |               | +-------------+
+	|                 | |               | +-------------+
+	|  function 	  | |   Timer API   | |    HW B     |
+	|          code   | |               | +-------------+
+	|                 | |               | +-------------+
+	|                 | |               | |    HW C     |
+	|                 | +---------------+ +-------------+
+	|                 | +---------------+ +-------------+
+	|                 | |               | |    HW A     |
+	|                 | |               | +-------------+
+	|                 | |               | +-------------+
+	|                 | |   GPIO API    | |    HW B     |
+	|                 | |               | +-------------+
+	|                 | |               | +-------------+
+	|                 | |               | |    HW C     |
+	+-----------------+ +---------------+ +-------------+
+
+			HAL 공용 인터페이스 개요
+
+각기 다른 하드웨어를 공용 API를 통해서 동일한 방법으로 접근하여 사용할 수 있으며, 이러면 기능 코드를 변경하지 않아도 펌웨어를 다른 하드웨어에 이식할 수 있다. 이러한 공용 인터페이스를 HAL(Hardware Abstraction Layer)라 한다. 
+
+====== ./hal/HalUart.h   ============
+#ifndef HAL_HALUART_H_
+#define HAL_HALUART_H_
+
+void Hal_uart_inti(void);		// UART하드웨어 초기화
+void Hal_uart_put_char(uint8_t ch);	// UART로 알파벳 한 글자씩 보내어 최종적으로 터미널에 출력
+
+#endif /* HAL_HALUART_H_ */
+
+=====================================
+
+HAL 구현체에서는 HalUart.h파일을  include하여 각자 하드웨어에 맞춰 구현-> 하나의 헤더파일에 여러 개의 c소스파일 존재. 펌웨어 개발 시 타겟에 맞는 하드웨어의 C소스 파일만 컴파일하여 사용:
+

@@ -157,7 +157,7 @@ typedef union UARTMIS_t{
 		uint32_t PEMIS:1;	// 8
 		uint32_t BEMIS:1;	// 9
 		uint32_t OEMIS:1;	// 10
-		uint32_t reserved;
+		uint32_t reserved:21;
 	} bits;
 } UARTMIS_t;
 
@@ -212,4 +212,3 @@ typedef struct PL011_t{
 #define UART_INTERRUPT0		44
 
 #endif	/* HAL_RVPB_UART_H_ */
-
