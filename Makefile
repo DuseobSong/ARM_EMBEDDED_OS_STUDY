@@ -7,9 +7,11 @@ CC = arm-none-eabi-gcc
 AS = arm-none-eabi-as
 LD = arm-none-eabi-gcc
 OC = arm-none-eabi-objcopy
+OD = arm-none-eabi-objdump
 
 LINKER_SCRIPT = ./navilos.ld
 MAP_FILE = build/navilos.map
+SYM_FILE = build/navilos.sym
 
 ASM_SRCS = $(wildcard boot/*.S)
 ASM_OBJS = $(patsubst boot/%.S, build/%.os, $(ASM_SRCS))
@@ -35,8 +37,8 @@ CFLAGS = -c -g -std=c11 -mthumb-interwork
 
 LDFLAGS = -nostartfiles -nostdlib -nodefaultlibs -static -lgcc
 
-navilos = build/navilos.axf
-navilos_bin = build/navilos.bin
+navilos 	= build/navilos.axf
+navilos_bin 	= build/navilos.bin
 
 .PHONY: all clean run debug gdb
 
@@ -56,6 +58,7 @@ gdb:
 
 $(navilos): $(ASM_OBJS) $(C_OBJS) $(LINKER_SCRIPT)
 	$(LD) -n -T $(LINKER_SCRIPT) -o $(navilos) $(ASM_OBJS) $(C_OBJS) -Wl,-Map=$(MAP_FILE) $(LDFLAGS)
+	$(OD) -t $(navilos) > $(SYM_FILE)
 	$(OC) -O binary $(navilos) $(navilos_bin)
 
 build/%.os: %.S

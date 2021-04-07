@@ -7,7 +7,7 @@
 #include "HalInterrupt.h"
 #include "HalTimer.h"
 
-#include "task.h"
+#include "Kernel.h"
 
 static void Hw_init(void);
 static void Kernel_init(void);
@@ -83,29 +83,32 @@ static void Kernel_init(void){
 	if(NOT_ENOUGH_TASK_NUM == taskId){
 		putstr("Task2 creation failed\n");
 	}
+	
+	Kernel_start();
 }
 
 void User_task0(void){
 	uint32_t local = 0;
-
-	debug_printf("User Task #0\n");
-	
-	while(true);
+	while(true){
+		debug_printf("User Task #0 SP=0x%x\n", &local);
+		Kernel_yield();
+	}
 }
 
 void User_task1(void){	
 	uint32_t local = 0;
 
-	debug_printf("User Task #1\n");
-
-	while(true);
+	while(true){
+		debug_printf("User Task #1 SP=0x%x\n", &local);
+		Kernel_yield();
+	}
 }
 
 void User_task2(void){
 	uint32_t local = 0;
-
-	debug_printf("User Task #2\n");
-
-	while(true);
+	while(true){
+		debug_printf("User Task #2 SP=0x%x\n", &local);
+		Kernel_yield();
+	}
 }
 
