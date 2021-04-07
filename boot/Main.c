@@ -86,18 +86,24 @@ static void Kernel_init(void){
 }
 
 void User_task0(void){
+	uint32_t local = 0;
+
 	debug_printf("User Task #0\n");
 	
 	while(true);
 }
 
-void User_task1(void){
+void User_task1(void){	
+	uint32_t local = 0;
+
 	debug_printf("User Task #1\n");
 
 	while(true);
 }
 
 void User_task2(void){
+	uint32_t local = 0;
+
 	debug_printf("User Task #2\n");
 
 	while(true);
